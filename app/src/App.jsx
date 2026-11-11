@@ -9,7 +9,8 @@ import HistoryModal from './components/HistoryModal';
 import EditProductModal from './components/EditProductModal';
 import NewProductModal from './components/NewProductModal';
 import SettingsModal from './components/SettingsModal';
-import { Camera, Mic, Plus } from 'lucide-react';
+import QuickFindModal from './components/QuickFindModal';
+import { Camera, Mic, Plus, Search } from 'lucide-react';
 import { searchProducts } from './utils/fuzzySearch';
 import {
   fetchSupabaseInventory,
@@ -71,10 +72,23 @@ export default function App() {
   // Modales
   const [isCameraOpen, setIsCameraOpen] = useState(false);
   const [isVoiceOpen, setIsVoiceOpen] = useState(false);
+  const [isQuickFindOpen, setIsQuickFindOpen] = useState(false);
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [isNewProductOpen, setIsNewProductOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState(null);
+
+  // Atajo de teclado global: Ctrl + B o Ctrl + F para abrir el Buscador Rápido (estilo Excel)
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'b' || e.key === 'B' || e.key === 'f' || e.key === 'F')) {
+        e.preventDefault();
+        setIsQuickFindOpen(true);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
 
   // Guardar en localStorage como respaldo offline
   useEffect(() => {
@@ -105,7 +119,6 @@ export default function App() {
     try {
       const remoteRows = await fetchSupabaseInventory();
       if (remoteRows && remoteRows.length > 0) {
-        // Mapear los items remotos
         setCatalog(remoteRows);
         setSyncStatus('synced');
       }
@@ -184,7 +197,7 @@ export default function App() {
     }
   };
 
-  // Añadir conteo a un producto individual (+1 o +5 desde la tarjeta)
+  // Añadir conteo a un producto individual (+1 o +5 desde la tarjeta o buscador)
   const handleAddCountToProduct = (product, delta, method = 'Manual') => {
     const newTotal = (product.conteo_fisico || 0) + delta;
     handleApplyBatchUpdates([{
@@ -196,7 +209,23 @@ export default function App() {
     }]);
   };
 
-  // Aplicar un lote de actualizaciones (Foto, Voz o Tarjeta)
+  // Saltar directamente a un producto en la lista y resaltarlo
+  const handleJumpToProduct = (productId) => {
+    setActiveFilter('todos');
+    setSearchQuery('');
+    setTimeout(() => {
+      const el = document.getElementById(`product-row-${productId}`);
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        el.classList.add('ring-4', 'ring-amber-400');
+        setTimeout(() => {
+          el.classList.remove('ring-4', 'ring-amber-400');
+        }, 3000);
+      }
+    }, 150);
+  };
+
+  // Aplicar un lote de actualizaciones (Foto, Voz, Buscador o Tarjeta)
   const handleApplyBatchUpdates = async (updates) => {
     if (!updates || updates.length === 0) return;
 
@@ -296,7 +325,6 @@ export default function App() {
         method: 'Corrección Manual'
       }]);
     } else {
-      // Solo cambio de nombre o número
       setSyncStatus('syncing');
       try {
         await pushBatchToSupabase([{
@@ -344,7 +372,7 @@ export default function App() {
 
   // Exportar inventario consolidado a archivo CSV descargable en el celular
   const handleExportCsv = () => {
-    let csv = '\uFEFF'; // BOM para compatibilidad con caracteres en Excel UTF-8
+    let csv = '\uFEFF';
     csv += 'No.,Nombre para mostrar,Numero_Funko,Codigo_FUN,Stock_Mayo,Stock_Junio,Stock_Octubre,Stock_Teorico,Conteo_Fisico_Actual,Diferencia,Estado\n';
 
     for (const p of catalog) {
@@ -397,7 +425,7 @@ export default function App() {
     };
   }, [catalog]);
 
-  // Filtrado y búsqueda rápida
+  // Filtrado y búsqueda rápida en la pantalla principal
   const filteredProducts = useMemo(() => {
     let list = catalog;
 
@@ -412,9 +440,9 @@ export default function App() {
       list = list.filter(p => p.is_new);
     }
 
-    // Búsqueda inteligente por nombre, número de caja o código [FUN...]
+    // Búsqueda inteligente por nombre, número de caja o número de fila
     if (searchQuery.trim()) {
-      list = searchProducts(list, searchQuery);
+      list = searchProducts(list, searchQuery, 200);
     }
 
     return list;
@@ -434,16 +462,17 @@ export default function App() {
         isRefreshing={isRefreshing}
       />
 
-      {/* Barra de Búsqueda y Filtros */}
+      {/* Barra de Búsqueda con Botón Ctrl+B de Localizador de Filas */}
       <SearchBar
         searchQuery={searchQuery}
         onSearchChange={setSearchQuery}
         activeFilter={activeFilter}
         onFilterChange={setActiveFilter}
+        onOpenQuickFind={() => setIsQuickFindOpen(true)}
         stats={stats}
       />
 
-      {/* Listado Virtualizado de Productos */}
+      {/* Listado de Productos */}
       <main className="flex-1 overflow-y-auto px-4 py-2 space-y-2 pb-28">
         {filteredProducts.length === 0 ? (
           <div className="text-center py-16 px-4">
@@ -452,7 +481,7 @@ export default function App() {
             </div>
             <p className="text-sm font-semibold text-slate-300">No se encontraron productos</p>
             <p className="text-xs text-slate-500 mt-1 max-w-xs mx-auto">
-              Intenta buscar por el número de caja (ej: 209), nombre de personaje o código [FUN...].
+              Intenta buscar por el número de fila (ej: 45), caja (#209) o nombre.
             </p>
             <button
               onClick={() => setIsNewProductOpen(true)}
@@ -473,40 +502,65 @@ export default function App() {
         )}
       </main>
 
-      {/* Botonera Flotante Inferior para el Celular (Cámara IA y Micrófono de Voz) */}
-      <div className="fixed bottom-0 inset-x-0 z-40 bg-gradient-to-t from-slate-950 via-slate-950/90 to-transparent pt-6 pb-[calc(var(--safe-bottom)+0.75rem)] px-4 pointer-events-none">
-        <div className="max-w-md mx-auto flex items-center justify-center gap-4 pointer-events-auto">
-          {/* Botón de Voz */}
+      {/* Botonera Flotante Inferior de 3 Accesos (Voz, Buscador Manual Ctrl+B y Cámara IA) */}
+      <div className="fixed bottom-0 inset-x-0 z-40 bg-gradient-to-t from-slate-950 via-slate-950/90 to-transparent pt-6 pb-[calc(var(--safe-bottom)+0.75rem)] px-3 pointer-events-none">
+        <div className="max-w-md mx-auto flex items-center justify-between gap-2 pointer-events-auto">
+          {/* 1. Botón de Voz */}
           <button
+            type="button"
             onClick={() => setIsVoiceOpen(true)}
-            className="flex-1 max-w-[160px] h-14 rounded-2xl bg-slate-800/95 hover:bg-slate-700 active:scale-95 text-indigo-400 border border-indigo-500/30 flex items-center justify-center gap-2 shadow-xl shadow-black/50 backdrop-blur-md transition-all"
+            className="flex-1 h-14 rounded-2xl bg-slate-800/95 hover:bg-slate-700 active:scale-95 text-indigo-400 border border-indigo-500/30 flex items-center justify-center gap-1.5 shadow-xl shadow-black/50 backdrop-blur-md transition-all px-2"
           >
-            <div className="w-9 h-9 rounded-xl bg-indigo-600/20 flex items-center justify-center">
-              <Mic className="w-5 h-5 text-indigo-400" />
+            <div className="w-8 h-8 rounded-xl bg-indigo-600/20 flex items-center justify-center shrink-0">
+              <Mic className="w-4 h-4 text-indigo-400" />
             </div>
             <div className="text-left">
-              <div className="text-[10px] uppercase font-bold text-indigo-300">Dictado</div>
-              <div className="text-xs font-semibold text-white">Comando Voz</div>
+              <div className="text-[9px] uppercase font-bold text-indigo-300">Dictado</div>
+              <div className="text-xs font-semibold text-white leading-tight">Voz</div>
             </div>
           </button>
 
-          {/* Botón Principal: Escaneo con Cámara IA */}
+          {/* 2. Botón Buscador Manual / Fila (Ctrl+B) */}
           <button
-            onClick={() => setIsCameraOpen(true)}
-            className="flex-1 max-w-[190px] h-14 rounded-2xl bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 hover:brightness-110 active:scale-95 text-white flex items-center justify-center gap-2.5 shadow-xl shadow-blue-900/40 backdrop-blur-md transition-all font-semibold"
+            type="button"
+            onClick={() => setIsQuickFindOpen(true)}
+            className="flex-1 h-14 rounded-2xl bg-slate-800/95 hover:bg-slate-700 active:scale-95 text-amber-300 border border-amber-500/30 flex items-center justify-center gap-1.5 shadow-xl shadow-black/50 backdrop-blur-md transition-all px-2"
           >
-            <div className="w-9 h-9 rounded-xl bg-white/20 flex items-center justify-center">
-              <Camera className="w-5 h-5 text-white" />
+            <div className="w-8 h-8 rounded-xl bg-amber-600/20 flex items-center justify-center shrink-0">
+              <Search className="w-4 h-4 text-amber-400" />
             </div>
             <div className="text-left">
-              <div className="text-[10px] uppercase tracking-wider text-blue-200">Reconocer</div>
-              <div className="text-xs font-bold text-white">Foto con IA</div>
+              <div className="text-[9px] uppercase font-bold text-amber-400">Buscar Fila</div>
+              <div className="text-xs font-semibold text-white leading-tight">Ctrl + B</div>
+            </div>
+          </button>
+
+          {/* 3. Botón Principal: Escaneo con Cámara IA */}
+          <button
+            type="button"
+            onClick={() => setIsCameraOpen(true)}
+            className="flex-1 h-14 rounded-2xl bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 hover:brightness-110 active:scale-95 text-white flex items-center justify-center gap-1.5 shadow-xl shadow-blue-900/40 backdrop-blur-md transition-all px-2"
+          >
+            <div className="w-8 h-8 rounded-xl bg-white/20 flex items-center justify-center shrink-0">
+              <Camera className="w-4 h-4 text-white" />
+            </div>
+            <div className="text-left">
+              <div className="text-[9px] uppercase tracking-wider text-blue-200">Reconocer</div>
+              <div className="text-xs font-bold text-white leading-tight">Cámara IA</div>
             </div>
           </button>
         </div>
       </div>
 
       {/* Modales del Sistema */}
+      <QuickFindModal
+        isOpen={isQuickFindOpen}
+        onClose={() => setIsQuickFindOpen(false)}
+        catalog={catalog}
+        onAddCount={handleAddCountToProduct}
+        onJumpToProduct={handleJumpToProduct}
+      />
+
       <CameraModal
         isOpen={isCameraOpen}
         onClose={() => setIsCameraOpen(false)}

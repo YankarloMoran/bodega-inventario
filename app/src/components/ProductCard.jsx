@@ -1,5 +1,5 @@
 import React from 'react';
-import { Plus, Edit2, Hash, Tag, Check, AlertTriangle } from 'lucide-react';
+import { Plus, Edit2, Hash, Tag, Check, AlertTriangle, FileSpreadsheet } from 'lucide-react';
 
 export default function ProductCard({
   product,
@@ -66,23 +66,36 @@ export default function ProductCard({
   }
 
   return (
-    <div className={`bg-slate-800/90 rounded-2xl p-3.5 mb-2.5 border ${borderColor} shadow-sm transition-all hover:bg-slate-800`}>
-      {/* Encabezado de la tarjeta: Tags y Estado */}
+    <div
+      id={`product-row-${product.id}`}
+      className={`bg-slate-800/90 rounded-2xl p-3.5 mb-2.5 border ${borderColor} shadow-sm transition-all hover:bg-slate-800`}
+    >
+      {/* Encabezado de la tarjeta: Número en Hoja Excel, Funko # y Estado */}
       <div className="flex items-center justify-between gap-2 mb-2">
         <div className="flex items-center gap-1.5 flex-wrap">
-          <span className="text-[11px] font-mono text-slate-400 bg-slate-900/80 px-2 py-0.5 rounded-md border border-slate-700/60">
-            #{product.id}
+          {/* Identificador de Fila en Hoja Excel destacado para cotejo manual */}
+          <span
+            className="text-xs font-bold text-amber-300 bg-amber-950/70 border border-amber-800/80 px-2 py-0.5 rounded-md flex items-center gap-1 shadow-sm"
+            title="Número de fila / renglón en la hoja de Excel impresa"
+          >
+            <FileSpreadsheet className="w-3 h-3 text-amber-400" />
+            <span>Fila #{product.id}</span>
           </span>
 
+          {/* Número de caja Funko */}
           {product.numero && (
-            <span className="px-2 py-0.5 rounded-md text-xs font-bold bg-blue-950 text-blue-400 border border-blue-800 flex items-center gap-0.5">
-              <Hash className="w-3 h-3" /> {product.numero}
+            <span
+              className="px-2 py-0.5 rounded-md text-xs font-bold bg-blue-950/80 text-blue-300 border border-blue-800/80 flex items-center gap-0.5"
+              title="Número de caja impreso en el Funko"
+            >
+              <Hash className="w-3 h-3 text-blue-400" /> Caja #{product.numero}
             </span>
           )}
 
+          {/* Código de producto */}
           {product.codigo && (
             <span className="px-2 py-0.5 rounded-md text-[10px] font-mono bg-slate-900 text-slate-300 border border-slate-700 flex items-center gap-0.5">
-              <Tag className="w-2.5 h-2.5" /> {product.codigo}
+              <Tag className="w-2.5 h-2.5 text-slate-400" /> {product.codigo}
             </span>
           )}
         </div>

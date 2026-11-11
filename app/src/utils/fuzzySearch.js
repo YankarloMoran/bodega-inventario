@@ -1,5 +1,5 @@
 /**
- * Algoritmo de búsqueda difusa y coincidencia para juguetes y Funkos
+ * Algoritmo de búsqueda avanzada para cotejo con Excel/hojas físicas
  */
 
 // Normalizar texto (elimina acentos, mayúsculas y caracteres especiales)
@@ -16,58 +16,83 @@ export function normalizeText(text) {
 }
 
 /**
- * Busca productos en el catálogo dado un texto de búsqueda
- * Prioriza:
- * 1. Coincidencia exacta de número de Funko (#209, 1586, etc.)
- * 2. Coincidencia de código [FUNxxxx]
- * 3. Coincidencia de tokens del nombre (ej: "spider man", "goku", "jordan")
+ * Busca productos en el catálogo dado un texto de búsqueda tipo Excel Ctrl+B.
+ * Soporta:
+ * - Búsqueda por Fila / No. de Hoja Excel (ej: "36", "fila 36", "f 36", "no 36", "#36")
+ * - Búsqueda por Número de caja Funko (ej: "#209", "box 209", "209")
+ * - Búsqueda por Código [FUN...] (ej: "FUN905930", "905930")
+ * - Búsqueda por múltiples palabras en cualquier orden (ej: "jordan bulls", "spider man iron", "harry poster")
  */
-export function searchProducts(catalog, query, limit = 50) {
+export function searchProducts(catalog, query, limit = 200) {
+  if (!catalog || !Array.isArray(catalog)) return [];
   if (!query || !query.trim()) {
-    return catalog.slice(0, limit);
+    return catalog;
   }
 
-  const cleanQuery = normalizeText(query);
+  const rawQuery = query.trim();
+  const cleanQuery = normalizeText(rawQuery);
+  if (!cleanQuery) return catalog;
+
   const queryTokens = cleanQuery.split(' ').filter(t => t.length > 0);
 
-  // Extraer número de caja si el usuario escribió un número
-  const numMatch = cleanQuery.match(/(?:#|num|no|numero)?\s*([0-9]{1,5})/i);
-  const queryNumber = numMatch ? numMatch[1] : null;
+  // 1. Detectar si el usuario está buscando explícitamente una fila de la hoja/Excel
+  // Ejemplos: "fila 15", "f15", "f 15", "no 15", "renglon 15", "hoja 15"
+  const rowMatch = cleanQuery.match(/(?:fila|renglon|hoja|item|posicion|f)\s*([0-9]{1,5})/i);
+  const explicitRowNumber = rowMatch ? parseInt(rowMatch[1], 10) : null;
+
+  // 2. Detectar si hay un número genérico en la consulta (puede ser ID de fila o número de Funko)
+  const genericNumMatch = cleanQuery.match(/(?:#|no|num|numero)?\s*([0-9]{1,5})/i);
+  const genericNumber = genericNumMatch ? genericNumMatch[1] : null;
+  const genericNumberInt = genericNumber ? parseInt(genericNumber, 10) : null;
 
   const scored = catalog.map(item => {
     let score = 0;
     const cleanNombre = normalizeText(item.nombre);
     const itemNumber = item.numero ? String(item.numero).trim() : '';
     const itemCodigo = item.codigo ? normalizeText(item.codigo) : '';
+    const itemId = item.id ? parseInt(item.id, 10) : null;
 
-    // Si coincide el número de caja exacto
-    if (queryNumber && itemNumber === queryNumber) {
-      score += 100;
+    // Prioridad Máxima: Coincidencia explícita con fila de la hoja Excel
+    if (explicitRowNumber && itemId === explicitRowNumber) {
+      return { item, score: 1000 };
     }
 
-    // Coincidencia de código FUN
-    if (itemCodigo && cleanQuery.includes(itemCodigo)) {
-      score += 80;
+    // Coincidencia con número de fila exacto (cuando escribe solo un número, ej: "36")
+    if (genericNumberInt && itemId === genericNumberInt) {
+      score += 250;
     }
 
-    // Coincidencia exacta del texto completo
+    // Coincidencia con número de caja de Funko (ej: "#209")
+    if (genericNumber && itemNumber === genericNumber) {
+      score += 200;
+    }
+
+    // Coincidencia exacta con código FUN
+    if (itemCodigo && (cleanQuery.includes(itemCodigo) || itemCodigo.includes(cleanQuery))) {
+      score += 180;
+    }
+
+    // Coincidencia exacta de la frase completa en el nombre
     if (cleanNombre.includes(cleanQuery)) {
-      score += 50;
+      score += 150;
     }
 
-    // Coincidencia por palabras clave
+    // Coincidencia por tokens / palabras múltiples en cualquier orden
     let matchedTokens = 0;
     for (const token of queryTokens) {
-      if (token === queryNumber) continue; // ya evaluado
+      if (token === genericNumber) continue; // ya evaluado en número
       if (cleanNombre.includes(token)) {
         matchedTokens++;
-        score += 15 * token.length;
+        score += 25 * token.length;
       }
     }
 
-    // Penalización si casi no coinciden palabras
-    if (queryTokens.length > 1 && matchedTokens === 0 && (!queryNumber || itemNumber !== queryNumber)) {
-      score = 0;
+    // Si todas las palabras buscadas están en el título, dar bono grande
+    const nonNumberTokens = queryTokens.filter(t => t !== genericNumber);
+    if (nonNumberTokens.length > 0 && matchedTokens === nonNumberTokens.length) {
+      score += 100;
+    } else if (nonNumberTokens.length > 1 && matchedTokens === 0 && !genericNumber) {
+      score = 0; // Si escribió varias palabras y ninguna coincide, descartar
     }
 
     return { item, score };
@@ -89,10 +114,10 @@ export function findBestMatch(catalog, characterName, boxNumber) {
   const targetNum = boxNumber ? String(boxNumber).replace(/[^0-9]/g, '') : null;
   const cleanChar = normalizeText(characterName || '');
 
-  // 1. Si tenemos número de caja, buscar candidatos que tengan ese mismo número
+  // 1. Si tenemos número de caja, filtrar candidatos con ese mismo número
   let candidates = catalog;
   if (targetNum) {
-    const exactNum = catalog.filter(p => p.numero === targetNum);
+    const exactNum = catalog.filter(p => String(p.numero).trim() === targetNum);
     if (exactNum.length === 1) {
       return exactNum[0];
     }
@@ -101,31 +126,30 @@ export function findBestMatch(catalog, characterName, boxNumber) {
     }
   }
 
-  // 2. Puntuar candidatos restantes por similitud de nombre
-  const charTokens = cleanChar.split(' ').filter(t => t.length > 2);
-  let bestItem = null;
+  // 2. Si no hay candidatos o el nombre es muy específico, buscar el de mayor similitud
+  let best = null;
   let maxScore = -1;
+  const tokens = cleanChar.split(' ').filter(t => t.length > 2);
 
   for (const item of candidates) {
     let score = 0;
-    const norm = normalizeText(item.nombre);
+    const cleanNombre = normalizeText(item.nombre);
 
-    if (targetNum && item.numero === targetNum) {
-      score += 50;
+    if (cleanNombre.includes(cleanChar)) {
+      score += 100;
     }
 
-    for (const token of charTokens) {
-      if (norm.includes(token)) {
-        score += 10;
+    for (const token of tokens) {
+      if (cleanNombre.includes(token)) {
+        score += 20;
       }
     }
 
     if (score > maxScore) {
       maxScore = score;
-      bestItem = item;
+      best = item;
     }
   }
 
-  return maxScore > 0 ? bestItem : (candidates[0] || null);
+  return best || candidates[0] || null;
 }
-
