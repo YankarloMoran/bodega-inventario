@@ -10,8 +10,11 @@ import EditProductModal from './components/EditProductModal';
 import NewProductModal from './components/NewProductModal';
 import SettingsModal from './components/SettingsModal';
 import QuickFindModal from './components/QuickFindModal';
-import { Camera, Mic, Plus, Search } from 'lucide-react';
+import BarcodeModal from './components/BarcodeModal';
+import LastCountedBanner from './components/LastCountedBanner';
+import { Camera, Mic, Plus, Search, ScanBarcode } from 'lucide-react';
 import { searchProducts } from './utils/fuzzySearch';
+import { supabase } from './utils/supabaseClient';
 import {
   fetchSupabaseInventory,
   fetchSupabaseHistory,
@@ -63,15 +66,19 @@ export default function App() {
     }
   });
 
+  // Último producto contado para acceso y suma rápida
+  const [lastCounted, setLastCounted] = useState(null);
+
   // Estados de interfaz
   const [searchQuery, setSearchQuery] = useState('');
-  const [activeFilter, setActiveFilter] = useState('todos');
+  const [activeFilter, setActiveFilter] = useState('todos'); // 'todos' | 'pendientes' | 'contados' | 'faltantes' | 'sobrantes' | 'nuevos'
   const [syncStatus, setSyncStatus] = useState('synced'); // 'synced' | 'syncing' | 'offline'
   const [isRefreshing, setIsRefreshing] = useState(false);
 
   // Modales
   const [isCameraOpen, setIsCameraOpen] = useState(false);
   const [isVoiceOpen, setIsVoiceOpen] = useState(false);
+  const [isBarcodeOpen, setIsBarcodeOpen] = useState(false);
   const [isQuickFindOpen, setIsQuickFindOpen] = useState(false);
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [isNewProductOpen, setIsNewProductOpen] = useState(false);
@@ -199,6 +206,9 @@ export default function App() {
 
   // Añadir conteo a un producto individual (+1 o +5 desde la tarjeta o buscador)
   const handleAddCountToProduct = (product, delta, method = 'Manual') => {
+    if (navigator.vibrate) {
+      navigator.vibrate(40);
+    }
     const newTotal = (product.conteo_fisico || 0) + delta;
     handleApplyBatchUpdates([{
       id: product.id,
@@ -207,6 +217,17 @@ export default function App() {
       new_total: newTotal,
       method: method
     }]);
+  };
+
+  // Enlazar un código de barras a un producto del catálogo en Supabase
+  const handleLinkBarcode = async (productId, barcode) => {
+    if (!productId || !barcode) return;
+    setCatalog(prev => prev.map(p => p.id === productId ? { ...p, barcode } : p));
+    try {
+      await supabase.from('inventario').update({ barcode }).eq('id', productId);
+    } catch (err) {
+      console.warn('Error vinculando código de barras en Supabase:', err);
+    }
   };
 
   // Saltar directamente a un producto en la lista y resaltarlo
@@ -225,9 +246,13 @@ export default function App() {
     }, 150);
   };
 
-  // Aplicar un lote de actualizaciones (Foto, Voz, Buscador o Tarjeta)
+  // Aplicar un lote de actualizaciones (Foto, Voz, Código de Barras o Tarjeta)
   const handleApplyBatchUpdates = async (updates) => {
     if (!updates || updates.length === 0) return;
+
+    if (navigator.vibrate) {
+      navigator.vibrate(45);
+    }
 
     const now = new Date();
     const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -238,15 +263,31 @@ export default function App() {
       updateMap[u.id] = u.new_total;
     }
 
+    let lastItemUpdated = null;
     setCatalog(prev => prev.map(p => {
       if (updateMap[p.id] !== undefined) {
-        return {
+        const updated = {
           ...p,
           conteo_fisico: updateMap[p.id]
         };
+        lastItemUpdated = updated;
+        return updated;
       }
       return p;
     }));
+
+    // Actualizar indicador de último producto contado
+    const lastUpdate = updates[updates.length - 1];
+    if (lastItemUpdated || lastUpdate) {
+      const prod = lastItemUpdated || catalog.find(p => p.id === lastUpdate.id);
+      if (prod) {
+        setLastCounted({
+          product: { ...prod, conteo_fisico: lastUpdate.new_total },
+          delta: lastUpdate.delta,
+          method: lastUpdate.method || 'Manual'
+        });
+      }
+    }
 
     // 2. Registrar en historial local
     const newHistoryEntries = updates.map((u, i) => ({
@@ -284,6 +325,10 @@ export default function App() {
 
     const revertAmount = historyEntry.delta;
     const newTotal = Math.max(0, (targetProduct.conteo_fisico || 0) - revertAmount);
+
+    if (navigator.vibrate) {
+      navigator.vibrate([30, 40, 30]);
+    }
 
     // Actualizar catálogo local
     setCatalog(prev => prev.map(p => {
@@ -373,7 +418,7 @@ export default function App() {
   // Exportar inventario consolidado a archivo CSV descargable en el celular
   const handleExportCsv = () => {
     let csv = '\uFEFF';
-    csv += 'No.,Nombre para mostrar,Numero_Funko,Codigo_FUN,Stock_Mayo,Stock_Junio,Stock_Octubre,Stock_Teorico,Conteo_Fisico_Actual,Diferencia,Estado\n';
+    csv += 'No.,Nombre para mostrar,Numero_Funko,Codigo_FUN,Codigo_Barras,Stock_Mayo,Stock_Junio,Stock_Octubre,Stock_Teorico,Conteo_Fisico_Actual,Diferencia,Estado\n';
 
     for (const p of catalog) {
       const teorico = p.stock_teorico || 0;
@@ -382,7 +427,7 @@ export default function App() {
       const estado = p.is_new ? 'Nuevo Físico' : (fisico === 0 ? 'Pendiente' : (diff === 0 ? 'Coincide' : (diff > 0 ? 'Sobrante' : 'Faltante')));
 
       const cleanNombre = `"${(p.nombre || '').replace(/"/g, '""')}"`;
-      csv += `${p.id},${cleanNombre},${p.numero || ''},${p.codigo || ''},${p.stock_mayo || 0},${p.stock_junio || 0},${p.stock_octubre || 0},${teorico},${fisico},${diff},${estado}\n`;
+      csv += `${p.id},${cleanNombre},${p.numero || ''},${p.codigo || ''},${p.barcode || ''},${p.stock_mayo || 0},${p.stock_junio || 0},${p.stock_octubre || 0},${teorico},${fisico},${diff},${estado}\n`;
     }
 
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
@@ -395,24 +440,43 @@ export default function App() {
     document.body.removeChild(link);
   };
 
-  // Cálculos estadísticos en tiempo real para la barra superior
+  // Cálculos estadísticos en tiempo real para la barra superior y filtros
   const stats = useMemo(() => {
     let counted = 0;
     let pending = 0;
     let totalPieces = 0;
     let differences = 0;
+    let missingCount = 0;
+    let surplusCount = 0;
+    let missingPieces = 0;
+    let surplusPieces = 0;
+    let newItems = 0;
 
     for (const p of catalog) {
       const fisico = p.conteo_fisico || 0;
       const teorico = p.stock_teorico || 0;
+      const diff = fisico - teorico;
+
+      if (p.is_new) {
+        newItems++;
+      }
+
       if (fisico > 0) {
         counted++;
         totalPieces += fisico;
       } else {
         pending++;
       }
-      if (fisico !== teorico && (fisico > 0 || teorico > 0)) {
+
+      if (diff !== 0 && (fisico > 0 || teorico > 0)) {
         differences++;
+        if (diff < 0) {
+          missingCount++;
+          missingPieces += Math.abs(diff);
+        } else {
+          surplusCount++;
+          surplusPieces += diff;
+        }
       }
     }
 
@@ -421,7 +485,12 @@ export default function App() {
       counted,
       pending,
       totalPieces,
-      differences
+      differences,
+      missingCount,
+      surplusCount,
+      missingPieces,
+      surplusPieces,
+      newItems
     };
   }, [catalog]);
 
@@ -434,8 +503,10 @@ export default function App() {
       list = list.filter(p => (p.conteo_fisico || 0) === 0);
     } else if (activeFilter === 'contados') {
       list = list.filter(p => (p.conteo_fisico || 0) > 0);
-    } else if (activeFilter === 'diferencias') {
-      list = list.filter(p => (p.conteo_fisico || 0) !== (p.stock_teorico || 0));
+    } else if (activeFilter === 'faltantes') {
+      list = list.filter(p => (p.conteo_fisico || 0) < (p.stock_teorico || 0));
+    } else if (activeFilter === 'sobrantes') {
+      list = list.filter(p => (p.conteo_fisico || 0) > (p.stock_teorico || 0));
     } else if (activeFilter === 'nuevos') {
       list = list.filter(p => p.is_new);
     }
@@ -462,18 +533,19 @@ export default function App() {
         isRefreshing={isRefreshing}
       />
 
-      {/* Barra de Búsqueda con Botón Ctrl+B de Localizador de Filas */}
+      {/* Barra de Búsqueda con Filtros Faltantes/Sobrantes, Escáner y Ctrl+B */}
       <SearchBar
         searchQuery={searchQuery}
         onSearchChange={setSearchQuery}
         activeFilter={activeFilter}
         onFilterChange={setActiveFilter}
         onOpenQuickFind={() => setIsQuickFindOpen(true)}
+        onOpenBarcodeScanner={() => setIsBarcodeOpen(true)}
         stats={stats}
       />
 
       {/* Listado de Productos */}
-      <main className="flex-1 overflow-y-auto px-4 py-2 space-y-2 pb-28">
+      <main className="flex-1 overflow-y-auto px-4 py-2 space-y-2 pb-36">
         {filteredProducts.length === 0 ? (
           <div className="text-center py-16 px-4">
             <div className="w-12 h-12 rounded-full bg-slate-900 border border-slate-800 text-slate-500 mx-auto flex items-center justify-center mb-3 text-lg font-bold">
@@ -502,57 +574,88 @@ export default function App() {
         )}
       </main>
 
-      {/* Botonera Flotante Inferior de 3 Accesos (Voz, Buscador Manual Ctrl+B y Cámara IA) */}
-      <div className="fixed bottom-0 inset-x-0 z-40 bg-gradient-to-t from-slate-950 via-slate-950/90 to-transparent pt-6 pb-[calc(var(--safe-bottom)+0.75rem)] px-3 pointer-events-none">
-        <div className="max-w-md mx-auto flex items-center justify-between gap-2 pointer-events-auto">
+      {/* Indicador de Último Producto Contado (Acceso Flotante Rápido) */}
+      <LastCountedBanner
+        lastCounted={lastCounted}
+        onAddCount={handleAddCountToProduct}
+        onClose={() => setLastCounted(null)}
+      />
+
+      {/* Botonera Flotante Inferior de 4 Accesos (Voz, Barras, Buscador Fila y Cámara IA) */}
+      <div className="fixed bottom-0 inset-x-0 z-40 bg-gradient-to-t from-slate-950 via-slate-950/95 to-transparent pt-6 pb-[calc(var(--safe-bottom)+0.75rem)] px-2.5 pointer-events-none">
+        <div className="max-w-md mx-auto flex items-center justify-between gap-1.5 pointer-events-auto">
+          
           {/* 1. Botón de Voz */}
           <button
             type="button"
             onClick={() => setIsVoiceOpen(true)}
-            className="flex-1 h-14 rounded-2xl bg-slate-800/95 hover:bg-slate-700 active:scale-95 text-indigo-400 border border-indigo-500/30 flex items-center justify-center gap-1.5 shadow-xl shadow-black/50 backdrop-blur-md transition-all px-2"
+            className="flex-1 h-14 rounded-2xl bg-slate-800/95 hover:bg-slate-700 active:scale-95 text-indigo-400 border border-indigo-500/30 flex items-center justify-center gap-1.5 shadow-xl shadow-black/50 backdrop-blur-md transition-all px-1.5"
           >
-            <div className="w-8 h-8 rounded-xl bg-indigo-600/20 flex items-center justify-center shrink-0">
+            <div className="w-7 h-7 rounded-xl bg-indigo-600/20 flex items-center justify-center shrink-0">
               <Mic className="w-4 h-4 text-indigo-400" />
             </div>
             <div className="text-left">
-              <div className="text-[9px] uppercase font-bold text-indigo-300">Dictado</div>
-              <div className="text-xs font-semibold text-white leading-tight">Voz</div>
+              <div className="text-[8px] uppercase font-bold text-indigo-300">Dictado</div>
+              <div className="text-[11px] font-semibold text-white leading-tight">Voz</div>
             </div>
           </button>
 
-          {/* 2. Botón Buscador Manual / Fila (Ctrl+B) */}
+          {/* 2. Botón Lector Código de Barras */}
+          <button
+            type="button"
+            onClick={() => setIsBarcodeOpen(true)}
+            className="flex-1 h-14 rounded-2xl bg-slate-800/95 hover:bg-slate-700 active:scale-95 text-blue-400 border border-blue-500/30 flex items-center justify-center gap-1.5 shadow-xl shadow-black/50 backdrop-blur-md transition-all px-1.5"
+          >
+            <div className="w-7 h-7 rounded-xl bg-blue-600/20 flex items-center justify-center shrink-0">
+              <ScanBarcode className="w-4 h-4 text-blue-400" />
+            </div>
+            <div className="text-left">
+              <div className="text-[8px] uppercase font-bold text-blue-300">Escanear</div>
+              <div className="text-[11px] font-semibold text-white leading-tight">Barras</div>
+            </div>
+          </button>
+
+          {/* 3. Botón Buscador Manual / Fila (Ctrl+B) */}
           <button
             type="button"
             onClick={() => setIsQuickFindOpen(true)}
-            className="flex-1 h-14 rounded-2xl bg-slate-800/95 hover:bg-slate-700 active:scale-95 text-amber-300 border border-amber-500/30 flex items-center justify-center gap-1.5 shadow-xl shadow-black/50 backdrop-blur-md transition-all px-2"
+            className="flex-1 h-14 rounded-2xl bg-slate-800/95 hover:bg-slate-700 active:scale-95 text-amber-300 border border-amber-500/30 flex items-center justify-center gap-1.5 shadow-xl shadow-black/50 backdrop-blur-md transition-all px-1.5"
           >
-            <div className="w-8 h-8 rounded-xl bg-amber-600/20 flex items-center justify-center shrink-0">
+            <div className="w-7 h-7 rounded-xl bg-amber-600/20 flex items-center justify-center shrink-0">
               <Search className="w-4 h-4 text-amber-400" />
             </div>
             <div className="text-left">
-              <div className="text-[9px] uppercase font-bold text-amber-400">Buscar Fila</div>
-              <div className="text-xs font-semibold text-white leading-tight">Ctrl + B</div>
+              <div className="text-[8px] uppercase font-bold text-amber-400">Buscar Fila</div>
+              <div className="text-[11px] font-semibold text-white leading-tight">Ctrl + B</div>
             </div>
           </button>
 
-          {/* 3. Botón Principal: Escaneo con Cámara IA */}
+          {/* 4. Botón Cámara IA */}
           <button
             type="button"
             onClick={() => setIsCameraOpen(true)}
-            className="flex-1 h-14 rounded-2xl bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 hover:brightness-110 active:scale-95 text-white flex items-center justify-center gap-1.5 shadow-xl shadow-blue-900/40 backdrop-blur-md transition-all px-2"
+            className="flex-1 h-14 rounded-2xl bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 hover:brightness-110 active:scale-95 text-white flex items-center justify-center gap-1.5 shadow-xl shadow-blue-900/40 backdrop-blur-md transition-all px-1.5"
           >
-            <div className="w-8 h-8 rounded-xl bg-white/20 flex items-center justify-center shrink-0">
+            <div className="w-7 h-7 rounded-xl bg-white/20 flex items-center justify-center shrink-0">
               <Camera className="w-4 h-4 text-white" />
             </div>
             <div className="text-left">
-              <div className="text-[9px] uppercase tracking-wider text-blue-200">Reconocer</div>
-              <div className="text-xs font-bold text-white leading-tight">Cámara IA</div>
+              <div className="text-[8px] uppercase tracking-wider text-blue-200">Reconocer</div>
+              <div className="text-[11px] font-bold text-white leading-tight">Cámara IA</div>
             </div>
           </button>
         </div>
       </div>
 
       {/* Modales del Sistema */}
+      <BarcodeModal
+        isOpen={isBarcodeOpen}
+        onClose={() => setIsBarcodeOpen(false)}
+        catalog={catalog}
+        onApplyUpdates={handleApplyBatchUpdates}
+        onLinkBarcode={handleLinkBarcode}
+      />
+
       <QuickFindModal
         isOpen={isQuickFindOpen}
         onClose={() => setIsQuickFindOpen(false)}
