@@ -1,0 +1,9 @@
+{
+  "name": "bodega-inventario",
+  "private": true,
+  "version": "1.0.0",
+  "scripts": {
+    "build": "cd app && npm install && npm run build",
+    "dev": "cd app && npm run dev"
+  }
+}
