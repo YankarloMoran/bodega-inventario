@@ -5,7 +5,8 @@ export default function EditProductModal({
   isOpen,
   onClose,
   product,
-  onSaveProduct
+  onSaveProduct,
+  onSave
 }) {
   const [nombre, setNombre] = useState('');
   const [numero, setNumero] = useState('');
@@ -23,12 +24,14 @@ export default function EditProductModal({
 
   const handleSave = (e) => {
     e.preventDefault();
-    onSaveProduct({
+    const updated = {
       ...product,
       nombre: nombre.trim(),
       numero: numero.trim(),
       conteo_fisico: Math.max(0, parseInt(conteoFisico, 10) || 0)
-    });
+    };
+    if (onSave) onSave(updated);
+    else if (onSaveProduct) onSaveProduct(updated);
     onClose();
   };
 

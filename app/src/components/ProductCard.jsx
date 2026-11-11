@@ -1,15 +1,28 @@
 import React from 'react';
-import { Plus, Edit2, Hash, Tag, Check, AlertTriangle, HelpCircle } from 'lucide-react';
+import { Plus, Edit2, Hash, Tag, Check, AlertTriangle } from 'lucide-react';
 
 export default function ProductCard({
   product,
   onAddCount,
+  onEdit,
   onEditProduct
 }) {
+  if (!product) return null;
+
   const teorico = product.stock_teorico || 0;
   const fisico = product.conteo_fisico || 0;
   const isCounted = fisico > 0;
   const diff = fisico - teorico;
+
+  // Manejadores flexibles de eventos
+  const handleEdit = () => {
+    if (onEdit) onEdit(product);
+    else if (onEditProduct) onEditProduct(product);
+  };
+
+  const handleAdd = (delta) => {
+    if (onAddCount) onAddCount(delta);
+  };
 
   // Determinar color de estado
   let statusBadge = null;
@@ -99,7 +112,8 @@ export default function ProductCard({
         {/* Botones de suma rápida y edición */}
         <div className="flex items-center gap-1.5">
           <button
-            onClick={() => onAddCount(product, 1)}
+            type="button"
+            onClick={() => handleAdd(1)}
             className="px-3 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-500 active:scale-95 text-white font-bold text-sm shadow flex items-center gap-0.5 transition"
             title="Sumar 1 unidad"
           >
@@ -107,7 +121,8 @@ export default function ProductCard({
           </button>
 
           <button
-            onClick={() => onAddCount(product, 5)}
+            type="button"
+            onClick={() => handleAdd(5)}
             className="px-2.5 py-1.5 rounded-xl bg-slate-700 hover:bg-slate-600 active:scale-95 text-slate-100 font-semibold text-xs border border-slate-600 transition"
             title="Sumar 5 unidades"
           >
@@ -115,7 +130,8 @@ export default function ProductCard({
           </button>
 
           <button
-            onClick={() => onEditProduct(product)}
+            type="button"
+            onClick={handleEdit}
             className="p-1.5 rounded-xl bg-slate-700/80 hover:bg-slate-600 text-slate-300 border border-slate-600 transition"
             title="Corregir datos o ingresar cantidad manual"
           >
@@ -126,4 +142,3 @@ export default function ProductCard({
     </div>
   );
 }
-

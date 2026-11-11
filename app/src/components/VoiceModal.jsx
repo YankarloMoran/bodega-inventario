@@ -7,7 +7,8 @@ export default function VoiceModal({
   isOpen,
   onClose,
   catalog,
-  onConfirmVoiceCount
+  onConfirmVoiceCount,
+  onApplyUpdates
 }) {
   const [isListening, setIsListening] = useState(false);
   const [transcript, setTranscript] = useState('');
@@ -111,13 +112,19 @@ export default function VoiceModal({
     const { product, quantity } = detectedAction;
     const newTotal = (product.conteo_fisico || 0) + quantity;
 
-    onConfirmVoiceCount({
+    const updatePayload = {
       id: product.id,
       nombre: product.nombre,
       delta: quantity,
       new_total: newTotal,
       method: 'Voz'
-    });
+    };
+
+    if (onApplyUpdates) {
+      onApplyUpdates([updatePayload]);
+    } else if (onConfirmVoiceCount) {
+      onConfirmVoiceCount(updatePayload);
+    }
 
     // Anuncio de éxito por voz
     speakText(`Guardado. Total: ${newTotal}`);

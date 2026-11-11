@@ -5,7 +5,9 @@ export default function NewProductModal({
   isOpen,
   onClose,
   nextId,
-  onAddNewProduct
+  catalogLength,
+  onAddNewProduct,
+  onAddProduct
 }) {
   const [nombre, setNombre] = useState('');
   const [numero, setNumero] = useState('');
@@ -13,12 +15,14 @@ export default function NewProductModal({
 
   if (!isOpen) return null;
 
+  const resolvedId = nextId || (catalogLength ? catalogLength + 1 : Date.now());
+
   const handleSubmit = (e) => {
     e.preventDefault();
     if (!nombre.trim()) return;
 
-    onAddNewProduct({
-      id: nextId,
+    const newProd = {
+      id: resolvedId,
       nombre: nombre.trim(),
       numero: numero.trim(),
       codigo: '',
@@ -29,7 +33,10 @@ export default function NewProductModal({
       conteo_fisico: Math.max(1, parseInt(conteo, 10) || 1),
       is_new: true,
       estado: 'nuevo'
-    });
+    };
+
+    if (onAddProduct) onAddProduct(newProd);
+    else if (onAddNewProduct) onAddNewProduct(newProd);
 
     setNombre('');
     setNumero('');

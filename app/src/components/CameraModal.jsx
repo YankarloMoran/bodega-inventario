@@ -8,7 +8,8 @@ export default function CameraModal({
   onClose,
   catalog,
   apiKey,
-  onConfirmBatch
+  onConfirmBatch,
+  onApplyUpdates
 }) {
   const [isProcessing, setIsProcessing] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
@@ -106,7 +107,8 @@ export default function CameraModal({
       return;
     }
 
-    onConfirmBatch(updates);
+    const callback = onConfirmBatch || onApplyUpdates;
+    if (callback) callback(updates);
     handleCloseModal();
   };
 
